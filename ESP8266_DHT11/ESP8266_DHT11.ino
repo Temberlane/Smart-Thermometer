@@ -1,53 +1,108 @@
 #include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <WiFiClientSecure.h>
 #include <dht_nonblocking.h>
-
-// WiFi credentials
-#define WIFI_SSID "Thompson_Wi-Fi"
-#define WIFI_PASS "RogersThompson"
-
-// DHT sensor setup
 #define DHT_SENSOR_TYPE DHT_TYPE_11
-static const int DHT_SENSOR_PIN = 12;
+
+// WiFi and MQTT Settings
+const char* ssid = "Thompson_Wi-Fi";
+const char* password = "RogersThompson";
+const char* mqtt_server = "0698d4f73af846d2a3ddb4811efceb90.s1.eu.hivemq.cloud";
+const int mqtt_port = 8883;  // Secure port for MQTT
+const char* mqtt_username = "Thermometer";  // Add your HiveMQ username
+const char* mqtt_password = "Samoht100";  // Add your HiveMQ password
+
+// Define DHT11 Pin
+static const int DHT_SENSOR_PIN = 2;
 DHT_nonblocking dht_sensor(DHT_SENSOR_PIN, DHT_SENSOR_TYPE);
 
-// Measurement interval (3 seconds)
-const unsigned long MEASURE_INTERVAL = 30;
-unsigned long lastMeasurement = 0;
+const unsigned long MEASURE_INTERVAL = 3000ul;
 
-void setup() {
-  Serial.begin(9600);
-  Serial.println("ESP8266 DHT11 Test");
-  
-  // Connect to WiFi
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.print("Connecting to WiFi");
-  
+// MQTT Client with secure connection
+WiFiClientSecure espClient;
+PubSubClient client(espClient);
+
+void setup_wifi() {
+  delay(10);
+  Serial.println("Connecting to WiFi...");
+  WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  
-  Serial.println();
-  Serial.println("WiFi connected");
+  Serial.println("Connected!");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 }
 
-void loop() {
-  float temperature;
-  float humidity;
-  
-  // Check if it's time for a new measurement
-  if (millis() - lastMeasurement >= MEASURE_INTERVAL) {
-    if (dht_sensor.measure(&temperature, &humidity)) {
-      lastMeasurement = millis();
-      
-      // Print JSON formatted data
-      Serial.print("{\"temp\":");
-      Serial.print(temperature, 1);
-      Serial.print(",\"humidity\":");
-      Serial.print(humidity, 1);
-      Serial.println("}");
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("Connecting to MQTT...");
+    // Create a random client ID
+    String clientId = "ESP8266Client-";
+    clientId += String(random(0xffff), HEX);
+    
+    // Attempt to connect with username and password
+    if (client.connect(clientId.c_str(), mqtt_username, mqtt_password)) {
+      Serial.println("Connected!");
+      // Subscribe to topics here if needed
+      // client.subscribe("home/commands");
+    } else {
+      Serial.print("Failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" Retrying in 5 seconds...");
+      delay(5000);
     }
   }
 }
+
+static bool measure_environment(float *temperature, float *humidity)
+{
+  static unsigned long measurement_timestamp = millis();
+
+  if(millis() - measurement_timestamp > MEASURE_INTERVAL)
+  {
+    if(dht_sensor.measure(temperature, humidity) == true)
+    {
+      measurement_timestamp = millis();
+      return(true);
+    }
+  }
+
+  return(false);
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("\nESP8266 Starting...");
+  
+  setup_wifi();
+  
+  // Skip certificate validation (for development only)
+  espClient.setInsecure();
+  
+  client.setServer(mqtt_server, mqtt_port);
+  Serial.println("MQTT server configured");
+  
+  randomSeed(micros());
+  Serial.println("Setup complete");
+}
+
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  float temperature;
+  float humidity;
+
+  if(measure_environment(&temperature, &humidity) == true){
+    String payload = "{\"temperature\": " + String(temperature) + ", \"humidity\": " + String(humidity) + "}";
+    client.publish("home/sensors/temperature", payload.c_str());
+    Serial.println("Published: " + payload);
+  }
+
+  delay(10000);
+}
+

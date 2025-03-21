@@ -13,7 +13,7 @@ const char* mqtt_username = "Thermometer";  // Add your HiveMQ username
 const char* mqtt_password = "Samoht100";  // Add your HiveMQ password
 
 // Define DHT11 Pin
-static const int DHT_SENSOR_PIN = 2;
+static const int DHT_SENSOR_PIN = 12;
 DHT_nonblocking dht_sensor(DHT_SENSOR_PIN, DHT_SENSOR_TYPE);
 
 const unsigned long MEASURE_INTERVAL = 3000ul;
@@ -97,12 +97,20 @@ void loop() {
   float temperature;
   float humidity;
 
+  // Add debug output
+  Serial.println("Checking for new measurements...");
+  
   if(measure_environment(&temperature, &humidity) == true){
+    Serial.println("Measurement successful!");
     String payload = "{\"temperature\": " + String(temperature) + ", \"humidity\": " + String(humidity) + "}";
     client.publish("home/sensors/temperature", payload.c_str());
     Serial.println("Published: " + payload);
+    Serial.println("Temperature: " + String(temperature));
+    Serial.println("Humidity: " + String(humidity));
+  } else {
+    Serial.println("No new measurement available");
   }
 
-  delay(10000);
+  delay(1000);
 }
 

@@ -1,6 +1,7 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const mqtt = require("mqtt");
+const {onSchedule} = require("firebase-functions/v2/scheduler");
 
 admin.initializeApp();
 const db = admin.database();
@@ -61,19 +62,24 @@ exports.getTemperature = functions.https.onRequest(async (req, res) => {
 
     if (!data) {
       return res.status(404).json({
-        speech: "Sorry, temperature data is not available right now.",
+        success: false,
+        message: "Temperature data not available",
       });
     }
 
-    const speech = [
-      `The room temperature is ${data.temperature} degrees Celsius`,
-      `and humidity is ${data.humidity} percent.`,
-    ].join(" ");
-    return res.json({speech});
+    // Return simple temperature and humidity data
+    return res.json({
+      success: true,
+      temperature: data.temperature,
+      humidity: data.humidity,
+      unit: "Celsius",
+      timestamp: Date.now(),
+    });
   } catch (error) {
     console.error("Error getting temperature:", error);
     return res.status(500).json({
-      speech: "Sorry, there was an error getting the temperature.",
+      success: false,
+      message: "Error retrieving temperature data",
     });
   }
 });
@@ -98,42 +104,47 @@ exports.testInsertData = functions.https.onRequest(async (req, res) => {
 });
 
 // Add this function to periodically fetch MQTT data
-exports.scheduledMqttBridge = functions.pubsub
-    .schedule("every 5 minutes")
-    .onRun(async (context) => {
-      const mqttServer = "0698d4f73af846d2a3ddb4811efceb90.s1.eu.hivemq.cloud";
-      const client = mqtt.connect(`mqtt://${mqttServer}`, {
-        username: "Thermometer",
-        password: "Samoht100",
-        port: 8883,
-        protocol: "mqtts",
-      });
+exports.scheduledMqttBridge = onSchedule({
+  schedule: "every 10 minutes",
+  region: "us-central1", // Specify your region
+  timeoutSeconds: 540,
+}, async (event) => {
+  const mqttServer = "0698d4f73af846d2a3ddb4811efceb90.s1.eu.hivemq.cloud";
+  const client = mqtt.connect(`mqtt://${mqttServer}`, {
+    username: "Thermometer",
+    password: "Samoht100",
+    port: 8883,
+    protocol: "mqtts",
+  });
 
-      let messageReceived = false;
+  let messageCount = 0;
 
-      client.on("connect", () => {
-        console.log("Scheduled job: Connected to MQTT broker");
-        client.subscribe("home/sensors/temperature");
-      });
+  client.on("connect", () => {
+    console.log("Scheduled job: Connected to MQTT broker");
+    client.subscribe("home/sensors/temperature");
+  });
 
-      client.on("message", (topic, message) => {
-        try {
-          const payload = JSON.parse(message.toString());
-          db.ref("sensors").set(payload);
-          console.log("Scheduled job: Data saved to Firebase");
-          messageReceived = true;
-        } catch (error) {
-          console.error("Error parsing message:", error);
-        }
-      });
+  client.on("message", (topic, message) => {
+    try {
+      const payload = JSON.parse(message.toString());
+      db.ref("sensors").set(payload);
+      console.log("Scheduled job: Data saved to Firebase");
+      messageCount++;
+      console.log(
+          `Scheduled job: Processed ${messageCount} messages so far`,
+      );
+    } catch (error) {
+      console.error("Error parsing message:", error);
+    }
+  });
 
-      // Wait for messages
-      await new Promise((resolve) => {
-        setTimeout(() => {
-          client.end();
-          resolve();
-        }, 30000);
-      });
+  // Wait for messages
+  await new Promise((resolve) => {
+    setTimeout(() => {
+      client.end();
+      resolve();
+    }, 30000);
+  });
 
-      return null;
-    });
+  return null;
+});

@@ -16,7 +16,7 @@ const char* mqtt_password = "Samoht100";  // Add your HiveMQ password
 static const int DHT_SENSOR_PIN = 12;
 DHT_nonblocking dht_sensor(DHT_SENSOR_PIN, DHT_SENSOR_TYPE);
 
-const unsigned long MEASURE_INTERVAL = 3000ul;
+const unsigned long MEASURE_INTERVAL = 150ul;
 
 // MQTT Client with secure connection
 WiFiClientSecure espClient;
@@ -111,6 +111,6 @@ void loop() {
     Serial.println("No new measurement available");
   }
 
-  delay(1000);
+  delay(100);
 }
 
